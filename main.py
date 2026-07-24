@@ -1,15 +1,20 @@
+
 """
 Standalone script: ask a question, get Qwen's answer + Gnosis's correctness score.
-Usage: python gnosis_score.py
+Usage: python main.py
 """
 
 import os
 import sys
 import torch
 
-# Make sure we're running from inside the Gnosis repo so local imports work
-sys.path.insert(0, "/content/Gnosis")
-os.chdir("/content/Gnosis")
+# Resolve paths relative to this script's own location — works no matter
+# what folder the repo gets cloned into, as long as Gnosis/ sits next to main.py
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+GNOSIS_DIR = os.path.join(SCRIPT_DIR, "Gnosis")
+
+sys.path.insert(0, GNOSIS_DIR)
+os.chdir(GNOSIS_DIR)
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob
