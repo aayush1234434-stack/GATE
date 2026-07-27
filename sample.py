@@ -65,5 +65,12 @@ print(f"\nTotal: {len(results)} | Correct: {sum(r['correct'] for r in results)}"
 correct_scores = [r["gnosis_score"] for r in results if r["correct"]]
 wrong_scores = [r["gnosis_score"] for r in results if not r["correct"]]
 
-print(f"Correct — mean: {statistics.mean(correct_scores):.4f}, min: {min(correct_scores):.4f}")
-print(f"Wrong   — mean: {statistics.mean(wrong_scores):.4f}, max: {max(wrong_scores):.4f}")
+if correct_scores:
+    print(f"Correct — mean: {statistics.mean(correct_scores):.4f}, min: {min(correct_scores):.4f}")
+else:
+    print("Correct — no correct answers")
+
+if wrong_scores:
+    print(f"Wrong   — mean: {statistics.mean(wrong_scores):.4f}, max: {max(wrong_scores):.4f}")
+else:
+    print("Wrong   — no wrong answers")
