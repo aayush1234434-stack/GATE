@@ -21,7 +21,7 @@ def load_model():
     print("Model loaded.")
     return model, tokenizer
 
-def ask_gnosis(model, tokenizer, question, max_new_tokens=512):
+def ask_gnosis(model, tokenizer, question, max_new_tokens=1536):
     
     prompt = build_chat_prompt(tokenizer, question=question)
 
