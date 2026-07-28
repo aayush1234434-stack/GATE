@@ -18,7 +18,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GNOSIS_DIR = os.path.join(SCRIPT_DIR, "Gnosis")
 sys.path.insert(0, GNOSIS_DIR)
 
-from src.demo import build_chat_prompt, generate_with_hf, correctness_prob
+from src.demo import build_chat_prompt, generate_with_hf, correctness_prob, has_correctness_head
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 THRESHOLD = 0.85
@@ -56,8 +56,18 @@ def load_model():
     print("Loading tokenizer and model (this may take a minute)...")
     tokenizer = AutoTokenizer.from_pretrained(GNOSIS_MODEL_ID, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        GNOSIS_MODEL_ID, dtype=torch.bfloat16, trust_remote_code=True,
+        GNOSIS_MODEL_ID,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        use_cache=False,
     ).cuda().eval()
+    if not has_correctness_head(model):
+        raise RuntimeError(
+            "Loaded model is missing the Gnosis correctness head. "
+            "Install the custom Transformers fork from the Gnosis repo before "
+            "running this script. In Colab: clone the Gnosis repo and run "
+            "`pip uninstall -y transformers && pip install -e /content/GATE/Gnosis/transformers`."
+        )
     print("Model loaded.")
     return model, tokenizer
 
@@ -104,11 +114,11 @@ def print_score_stats(results, score_key="gnosis_score", correct_key="correct"):
         print("Wrong   — no wrong answers")
 
 
-def print_threshold_metrics(results, threshold=THRESHOLD):
-    caught = sum(1 for r in results if r["gnosis_score"] < threshold and not r["correct"])
-    unnecessary = sum(1 for r in results if r["gnosis_score"] < threshold and r["correct"])
-    missed = sum(1 for r in results if r["gnosis_score"] >= threshold and not r["correct"])
-    trusted_correct = sum(1 for r in results if r["gnosis_score"] >= threshold and r["correct"])
+def print_threshold_metrics(results, threshold=THRESHOLD, correct_key="baseline_correct"):
+    caught = sum(1 for r in results if r["gnosis_score"] < threshold and not r[correct_key])
+    unnecessary = sum(1 for r in results if r["gnosis_score"] < threshold and r[correct_key])
+    missed = sum(1 for r in results if r["gnosis_score"] >= threshold and not r[correct_key])
+    trusted_correct = sum(1 for r in results if r["gnosis_score"] >= threshold and r[correct_key])
     flagged = caught + unnecessary
 
     print("\n" + "=" * 60)
