@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 results.json
+baseline_results.json
+phase_2/random_results.json
+phase_2/comparison.json
