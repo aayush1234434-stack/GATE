@@ -1,0 +1,12 @@
+{
+  "n": 100,
+  "n_wrong": 6,
+  "n_correct": 94,
+  "auroc_gnosis_score": 0.4255,
+  "auroc_risk_1_minus_score": 0.5762,
+  "correct_score_mean": 0.8939,
+  "correct_score_min": 0.0864,
+  "wrong_score_mean": 0.8984,
+  "wrong_score_max": 0.9688,
+  "interpretation_note": "AUROC uses risk = 1 - gnosis_score (higher risk = more likely wrong). Only 6 wrong answers \u2014 unstable on small samples."
+}

@@ -57,7 +57,11 @@ SEED=42 N_INTERVENE=22 PYTHONPATH=/content/GATE/Gnosis python phase_2/random_bas
 | `comparison.json` | Side-by-side Gnosis vs Random metrics |
 | `oracle_analysis.json` | Full detection + outcome table (`oracle_analysis.py`) |
 
-Run analysis (no GPU): `python phase_2/oracle_analysis.py`
+Run analysis (no GPU):
+```bash
+python phase_2/oracle_analysis.py   # full Phase 2 tables + AUROC
+python phase_2/auroc_analysis.py      # AUROC only
+```
 
 ## How to interpret
 | Outcome | Meaning |

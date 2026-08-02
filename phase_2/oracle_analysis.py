@@ -6,6 +6,7 @@ Reads saved artifacts and prints:
   - Detection: Gnosis vs Random vs Oracle (perfect wrong-only gate)
   - Outcome: Baseline vs Random vs Gnosis (if gnosis_results.json exists)
   - Theoretical oracle outcome ceiling (if regen always fixes wrong answers)
+  - AUROC: can gnosis_score rank wrong vs correct? (via auroc_analysis)
 
 Usage:
   python phase_2/oracle_analysis.py
@@ -227,6 +228,15 @@ def main():
 
     print_wrong_questions(baseline)
 
+    # --- AUROC ---
+    import sys
+    sys.path.insert(0, str(PHASE_DIR))
+    from auroc_analysis import compute_auroc, interpret_auroc, print_auroc_report
+
+    auroc_metrics = compute_auroc(baseline)
+    print_auroc_report(auroc_metrics)
+    save_json(artifacts / "auroc.json", auroc_metrics)
+
     # --- Interpretation ---
     print("\n" + "=" * 72)
     print("INTERPRETATION")
@@ -243,10 +253,13 @@ def main():
     print(f"  Gnosis detection recall: {gnosis_det['recall']:.0%} at threshold {THRESHOLD}")
     if gnosis_det["recall"] < oracle_det["recall"]:
         print("  Gnosis catches fewer wrong answers than a perfect oracle would.")
+    print(f"  AUROC (risk = 1 - score): {auroc_metrics['auroc_risk_1_minus_score']:.4f} — "
+          f"{interpret_auroc(auroc_metrics['auroc_risk_1_minus_score'])}")
 
     report = {
         "threshold": THRESHOLD,
         "n_questions": n,
+        "auroc": auroc_metrics,
         "detection": {
             "gnosis": gnosis_det,
             "random": random_det,
