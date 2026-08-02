@@ -55,6 +55,9 @@ SEED=42 N_INTERVENE=22 PYTHONPATH=/content/GATE/Gnosis python phase_2/random_bas
 | `random_picked_ids.json` | Which questions were randomly selected (seeded) |
 | `random_results.json` | Full results after random regenerate |
 | `comparison.json` | Side-by-side Gnosis vs Random metrics |
+| `oracle_analysis.json` | Full detection + outcome table (`oracle_analysis.py`) |
+
+Run analysis (no GPU): `python phase_2/oracle_analysis.py`
 
 ## How to interpret
 | Outcome | Meaning |

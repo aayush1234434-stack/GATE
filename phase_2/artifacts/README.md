@@ -33,10 +33,12 @@ If you have `baseline_results.json` OR `gnosis_results.json` here (or at repo ro
 PYTHONPATH=/content/GATE/Gnosis python phase_2/random_baseline.py
 ```
 
-With artifacts only in this folder:
+## Oracle & comparison (no GPU)
+
+After artifacts are saved, run:
 
 ```bash
-BASELINE_PATH=phase_2/artifacts/gnosis_results.json \
-GNOSIS_RESULTS=phase_2/artifacts/gnosis_results.json \
-PYTHONPATH=/content/GATE/Gnosis python phase_2/random_baseline.py
+python phase_2/oracle_analysis.py
 ```
+
+Writes `oracle_analysis.json` with detection (Gnosis vs Random vs Oracle) and outcome tables.

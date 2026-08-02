@@ -1,0 +1,84 @@
+{
+  "threshold": 0.85,
+  "n_questions": 100,
+  "detection": {
+    "gnosis": {
+      "label": "Gnosis (score < 0.85)",
+      "threshold_or_policy": "Gnosis (score < 0.85)",
+      "intervened": 18,
+      "caught": 1,
+      "missed": 5,
+      "unnecessary": 17,
+      "precision": 0.0556,
+      "recall": 0.1667,
+      "total_wrong": 6
+    },
+    "random": {
+      "label": "Random (matched budget)",
+      "threshold_or_policy": "Random (matched budget)",
+      "intervened": 18,
+      "caught": 0,
+      "missed": 6,
+      "unnecessary": 18,
+      "precision": 0.0,
+      "recall": 0.0,
+      "total_wrong": 6
+    },
+    "oracle": {
+      "label": "Oracle (perfect: flag all wrong)",
+      "threshold_or_policy": "Oracle (perfect: flag all wrong)",
+      "intervened": 6,
+      "caught": 6,
+      "missed": 0,
+      "unnecessary": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "total_wrong": 6
+    }
+  },
+  "outcome": [
+    {
+      "label": "No intervention (baseline)",
+      "n": 100,
+      "baseline_wrong": 6,
+      "final_wrong": 6,
+      "intervened": 0,
+      "wrong_among_intervened": 0,
+      "fixed": 0,
+      "broke": 0,
+      "still_wrong_after_regen": 0,
+      "hallucination_reduction": 0
+    },
+    {
+      "label": "Random-gated regenerate",
+      "n": 100,
+      "baseline_wrong": 6,
+      "final_wrong": 6,
+      "intervened": 18,
+      "wrong_among_intervened": 0,
+      "fixed": 0,
+      "broke": 0,
+      "still_wrong_after_regen": 0,
+      "hallucination_reduction": 0
+    },
+    {
+      "label": "Oracle outcome (theoretical ceiling)",
+      "n": 100,
+      "baseline_wrong": 6,
+      "final_wrong": 0,
+      "intervened": 6,
+      "fixed": 6,
+      "broke": 0,
+      "hallucination_reduction": 6,
+      "note": "Assumes regenerate fixes all known-wrong answers; not measured unless you run oracle regen."
+    }
+  ],
+  "baseline_wrong_ids": [
+    4,
+    81,
+    90,
+    94,
+    96,
+    99
+  ]
+}
