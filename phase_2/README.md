@@ -11,9 +11,21 @@ Does Gnosis’s score help pick *who* to regenerate, or would regenerating the s
   - Fixed: **1**, Broke: **1**, Still wrong after regen: **3**
   - Net hallucination reduction: **0** (5/100 → 5/100)
 
-Put your Colab artifacts in the repo root (or point env vars):
-- `baseline_results.json` — required (skip redoing Pass 1)
-- `results.json` — Gnosis Pass 2 output (for auto comparison)
+## What you need to run Phase 2 (random control)
+
+| You have | What to run | Time |
+|----------|-------------|------|
+| **`results.json`** (full Gnosis run) | Only `random_baseline.py` | ~20–40 min (18 regenerations) |
+| **`baseline_results.json` only** | `random_baseline.py` + set `N_INTERVENE=18` if no results.json | same |
+| **Neither file** | Full `sample.py` first, then random | ~1.5h + ~30 min |
+
+`results.json` **includes** baseline answers/scores — the script can use it instead of `baseline_results.json`.
+
+Put files in repo root **or** `phase_2/artifacts/` (see `artifacts/README.md` for committed snapshots).
+
+Required inputs:
+- `baseline_results.json` **or** `results.json` — baseline answers + Gnosis scores (no Pass 1 redo)
+- `results.json` — optional but needed for automatic Gnosis vs Random table
 
 ## Random arm (this folder)
 Script: `random_baseline.py`

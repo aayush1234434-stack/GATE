@@ -5,3 +5,7 @@ results.json
 baseline_results.json
 phase_2/random_results.json
 phase_2/comparison.json
+phase_2/random_picked_ids.json
+# committed snapshots live in phase_2/artifacts/
+!phase_2/artifacts/
+!phase_2/artifacts/**

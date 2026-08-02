@@ -267,17 +267,37 @@ def run_random_intervention(model, tokenizer, baseline, pick_indices):
     return results
 
 
+def resolve_baseline_path(explicit: str | None = None) -> str:
+    """Find baseline data: baseline_results.json, or results.json (same baseline fields)."""
+    if explicit and os.path.exists(explicit):
+        return explicit
+    candidates = [
+        DEFAULT_BASELINE,
+        DEFAULT_GNOSIS_RESULTS,
+        os.path.join(PHASE_DIR, "artifacts", "baseline_results.json"),
+        os.path.join(PHASE_DIR, "artifacts", "gnosis_results.json"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise SystemExit(
+        "Missing baseline data. You need ONE of these at repo root or phase_2/artifacts/:\n"
+        "  - baseline_results.json  (Pass 1 only)\n"
+        "  - results.json           (full Gnosis run — works as baseline too)\n"
+        "Or set BASELINE_PATH=/path/to/file.json\n"
+        "If you have neither, re-run: python sample.py (~1.5h for Pass 1)."
+    )
+
+
 def main():
-    baseline_path = os.environ.get("BASELINE_PATH", DEFAULT_BASELINE)
+    baseline_path = resolve_baseline_path(os.environ.get("BASELINE_PATH") or None)
     gnosis_path = os.environ.get("GNOSIS_RESULTS", DEFAULT_GNOSIS_RESULTS)
+    if not os.path.exists(gnosis_path):
+        alt = os.path.join(PHASE_DIR, "artifacts", "gnosis_results.json")
+        if os.path.exists(alt):
+            gnosis_path = alt
     seed = int(os.environ.get("SEED", "42"))
     skip_model = os.environ.get("SKIP_MODEL", "").strip() in {"1", "true", "True", "yes"}
-
-    if not os.path.exists(baseline_path):
-        raise SystemExit(
-            f"Missing baseline file: {baseline_path}\n"
-            "Copy baseline_results.json from Colab into the repo root, or set BASELINE_PATH."
-        )
 
     baseline = load_json(baseline_path)
     print(f"Loaded baseline: {baseline_path} ({len(baseline)} records)")
