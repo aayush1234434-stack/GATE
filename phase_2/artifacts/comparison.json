@@ -1,0 +1,28 @@
+{
+  "random": {
+    "label": "RANDOM-GATED REGENERATE",
+    "n": 100,
+    "baseline_wrong": 6,
+    "final_wrong": 6,
+    "intervened": 18,
+    "wrong_among_intervened": 0,
+    "fixed": 0,
+    "broke": 0,
+    "still_wrong_after_regen": 0,
+    "hallucination_reduction": 0,
+    "baseline_wrong_rate": 0.06,
+    "final_wrong_rate": 0.06
+  },
+  "seed": 42,
+  "n_intervene": 18,
+  "gnosis_reference_from_pilot": {
+    "note": "From Colab run (manual); replace when results.json is available",
+    "baseline_wrong": 5,
+    "final_wrong": 5,
+    "intervened": 22,
+    "fixed": 1,
+    "broke": 1,
+    "still_wrong_after_regen": 3,
+    "hallucination_reduction": 0
+  }
+}
