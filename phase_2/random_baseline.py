@@ -33,9 +33,12 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 PHASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(PHASE_DIR)
 GNOSIS_DIR = os.path.join(REPO_ROOT, "Gnosis")
+sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, GNOSIS_DIR)
 
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob, has_correctness_head
+
+from eval_utils import is_correct
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 THRESHOLD = 0.85
@@ -71,10 +74,6 @@ def save_json(path, obj):
     with open(path, "w") as f:
         json.dump(obj, f, indent=2)
     print(f"Saved: {path}")
-
-
-def is_correct(answer, ground_truth):
-    return str(ground_truth).strip().lower() in answer.strip().lower()
 
 
 def load_model():
@@ -246,7 +245,7 @@ def run_random_intervention(model, tokenizer, baseline, pick_indices):
         domain = r.get("domain", "trivia")
         system_prompt = REGENERATE_PROMPTS.get(domain, REGENERATE_PROMPTS["trivia"])
         answer, score = ask_gnosis(model, tokenizer, r["question"], system_prompt)
-        correct = is_correct(answer, r["ground_truth"])
+        correct = is_correct(answer, r["ground_truth"], r.get("answer_aliases"))
 
         r["selection"] = "random"
         r["intervened"] = True

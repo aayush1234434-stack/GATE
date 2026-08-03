@@ -20,9 +20,12 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GNOSIS_DIR = os.path.join(SCRIPT_DIR, "Gnosis")
+sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, GNOSIS_DIR)
 
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob, has_correctness_head
+
+from eval_utils import is_correct
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 THRESHOLD = 0.85
@@ -88,10 +91,6 @@ def load_model():
         )
     print("Model loaded.")
     return model, tokenizer
-
-
-def is_correct(answer, ground_truth):
-    return str(ground_truth).strip().lower() in answer.strip().lower()
 
 
 def ask_gnosis(model, tokenizer, question, system_prompt, max_new_tokens=1536):
@@ -179,7 +178,7 @@ def run_pass1(model, tokenizer, existing=None):
         domain = q.get("domain", "trivia")
         system_prompt = SYSTEM_PROMPTS.get(domain, SYSTEM_PROMPTS["trivia"])
         answer, score = ask_gnosis(model, tokenizer, q["question"], system_prompt)
-        correct = is_correct(answer, q["ground_truth"])
+        correct = is_correct(answer, q["ground_truth"], q.get("answer_aliases"))
 
         record = {
             "id": qid,
@@ -223,7 +222,7 @@ def run_pass2(model, tokenizer, results):
         domain = r["domain"]
         system_prompt = REGENERATE_PROMPTS.get(domain, REGENERATE_PROMPTS["trivia"])
         answer, score = ask_gnosis(model, tokenizer, r["question"], system_prompt)
-        correct = is_correct(answer, r["ground_truth"])
+        correct = is_correct(answer, r["ground_truth"], r.get("answer_aliases"))
 
         r["intervened"] = True
         r["regen_answer"] = answer
