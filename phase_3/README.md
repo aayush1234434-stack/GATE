@@ -17,11 +17,34 @@ Trivia rows include `answer_aliases`; `sample.py` uses them in `eval_utils.is_co
 
 That is **normal**, not an error. Competition-math prompts include diagrams and long problem text. The script prints a short preview at the end.
 
-## Run evaluation on the new set
+## Run baseline + Gnosis scores (Pass 1 only, resumable)
+
+Use `run_baseline.py` instead of `sample.py` for Phase 3. It saves after **every** question and resumes if Colab dies.
 
 ```python
-!cp phase_3/artifacts/questions_700.json questions.json
-!PYTHONPATH=/content/GATE/Gnosis python sample.py
+%cd /content/GATE
+!pip uninstall -y transformers && pip install -e /content/GATE/Gnosis/transformers
+!PYTHONPATH=/content/GATE/Gnosis python phase_3/run_baseline.py
+```
+
+Output: `phase_3/artifacts/baseline_results.json` (same format as Phase 2 `baseline_results.json`).
+
+**Resume:** re-run the same command — it picks up from the checkpoint automatically.
+
+**Start over:** `RERUN_BASELINE=1 python phase_3/run_baseline.py`
+
+**Copy checkpoint to Drive** after each session so you can restore if the runtime is recycled:
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+!cp phase_3/artifacts/baseline_results.json /content/drive/MyDrive/gate_phase3_baseline.json
+```
+
+## AUROC (no GPU, after baseline completes)
+
+```python
+BASELINE_PATH=phase_3/artifacts/baseline_results.json python phase_2/auroc_analysis.py
 ```
 
 ## Commit artifacts
