@@ -40,5 +40,14 @@ That is **normal**, not an error. Competition-math prompts include diagrams and 
 ## AUROC (no GPU, after baseline completes)
 
 ```python
-BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_2/auroc_analysis.py
+%cd /content/GATE
+!BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_3/auroc_analysis.py
 ```
+
+Or if the file is in `phase_3/artifacts/`:
+
+```bash
+python phase_3/auroc_analysis.py
+```
+
+Output: `phase_3/artifacts/auroc.json` (overall + trivia/math breakdown, Phase 2 comparison)

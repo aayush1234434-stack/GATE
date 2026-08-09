@@ -133,7 +133,7 @@ with open("/content/drive/MyDrive/gate_phase3_baseline.json") as f:
 %cd /content/GATE
 import os
 os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
-!BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_2/auroc_analysis.py
+!BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_3/auroc_analysis.py
 ```
 
 ### Download results to your laptop
