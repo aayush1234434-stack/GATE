@@ -51,3 +51,42 @@ python phase_3/auroc_analysis.py
 ```
 
 Output: `phase_3/artifacts/auroc.json` (overall + trivia/math breakdown, Phase 2 comparison)
+
+## Threshold sweep (no GPU)
+
+```bash
+BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_3/threshold_sweep.py
+```
+
+## Bootstrap CIs (no GPU)
+
+```bash
+BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_3/bootstrap_analysis.py
+```
+
+Output: `phase_3/artifacts/bootstrap.json` (AUROC + threshold sweep 95% CIs)
+
+## Regeneration ablation — trivia, no RAG (GPU)
+
+Same regenerate prompt as Phase 2. Gnosis-gated vs random-matched control. Resumes from checkpoint.
+
+```python
+import os
+os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
+os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_700.json"
+os.environ["THRESHOLD"] = "0.50"   # or 0.60
+
+%cd /content/GATE
+!PYTHONPATH=/content/GATE/Gnosis python phase_3/regen_ablation.py
+```
+
+Outputs:
+- `phase_3/artifacts/regen_gnosis_results.json`
+- `phase_3/artifacts/regen_random_results.json`
+- `phase_3/artifacts/regen_comparison.json`
+
+Resume partial runs: re-run the same command. Skip a finished arm with `SKIP_GNOSIS=1` or `SKIP_RANDOM=1`.
+
+## Grading / aliases
+
+`eval_utils.enrich_records()` and `grade_record()` attach TriviaQA `answer_aliases` when scoring regen answers. Baseline records now store `answer_aliases` when present in the question set.

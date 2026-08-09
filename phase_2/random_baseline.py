@@ -38,7 +38,7 @@ sys.path.insert(0, GNOSIS_DIR)
 
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob, has_correctness_head
 
-from eval_utils import is_correct
+from eval_utils import is_correct, grade_record, build_question_lookup, enrich_records
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 THRESHOLD = 0.85
@@ -219,7 +219,7 @@ def pick_random_indices(n_total, n_pick, seed):
     return sorted(indices[:n_pick])
 
 
-def run_random_intervention(model, tokenizer, baseline, pick_indices):
+def run_random_intervention(model, tokenizer, baseline, pick_indices, question_lookup=None):
     results = copy.deepcopy(baseline)
     pick_set = set(pick_indices)
 
@@ -245,7 +245,7 @@ def run_random_intervention(model, tokenizer, baseline, pick_indices):
         domain = r.get("domain", "trivia")
         system_prompt = REGENERATE_PROMPTS.get(domain, REGENERATE_PROMPTS["trivia"])
         answer, score = ask_gnosis(model, tokenizer, r["question"], system_prompt)
-        correct = is_correct(answer, r["ground_truth"], r.get("answer_aliases"))
+        correct = grade_record(r, answer, question_lookup)
 
         r["selection"] = "random"
         r["intervened"] = True
@@ -301,6 +301,26 @@ def main():
     baseline = load_json(baseline_path)
     print(f"Loaded baseline: {baseline_path} ({len(baseline)} records)")
 
+    questions_path = os.environ.get("QUESTIONS_PATH", "").strip()
+    question_lookup = None
+    if questions_path and os.path.exists(questions_path):
+        questions = load_json(questions_path)
+        baseline = enrich_records(baseline, questions)
+        question_lookup = build_question_lookup(questions)
+        print(f"Enriched records with aliases from {questions_path}")
+    elif any(r.get("answer_aliases") for r in baseline):
+        question_lookup = build_question_lookup(
+            [
+                {
+                    "id": r.get("id"),
+                    "question": r.get("question"),
+                    "ground_truth": r.get("ground_truth"),
+                    "answer_aliases": r.get("answer_aliases"),
+                }
+                for r in baseline
+            ]
+        )
+
     n_intervene = resolve_n_intervene(baseline, gnosis_path)
     if n_intervene > len(baseline):
         raise SystemExit(f"N_INTERVENE={n_intervene} > baseline size {len(baseline)}")
@@ -322,7 +342,9 @@ def main():
         random_results = load_json(RANDOM_RESULTS_PATH)
     else:
         model, tokenizer = load_model()
-        random_results = run_random_intervention(model, tokenizer, baseline, pick_indices)
+        random_results = run_random_intervention(
+            model, tokenizer, baseline, pick_indices, question_lookup
+        )
         save_json(RANDOM_RESULTS_PATH, random_results)
 
     random_summary = summarize(random_results, "RANDOM-GATED REGENERATE")

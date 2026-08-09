@@ -133,8 +133,31 @@ with open("/content/drive/MyDrive/gate_phase3_baseline.json") as f:
 %cd /content/GATE
 import os
 os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
-!BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_3/auroc_analysis.py
+!python phase_3/auroc_analysis.py
 ```
+
+### Bootstrap CIs + threshold sweep (no GPU)
+
+```python
+%cd /content/GATE
+import os
+os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
+!python phase_3/bootstrap_analysis.py
+!python phase_3/threshold_sweep.py
+```
+
+### Regeneration ablation — trivia, τ=0.50 (GPU, resumable)
+
+```python
+%cd /content/GATE
+import os
+os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
+os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_700.json"
+os.environ["THRESHOLD"] = "0.50"
+!PYTHONPATH=/content/GATE/Gnosis python phase_3/regen_ablation.py
+```
+
+Re-run to resume. After gnosis arm finishes: `os.environ["SKIP_GNOSIS"] = "1"` then re-run for random only.
 
 ### Download results to your laptop
 

@@ -120,7 +120,7 @@ def ask_gnosis(model, tokenizer, question, system_prompt, max_new_tokens=1536):
 
 def make_record(q: dict, answer: str, score: float, correct: bool) -> dict:
     """Same schema as Phase 2 baseline_results.json."""
-    return {
+    record = {
         "id": q.get("id"),
         "domain": q.get("domain", "trivia"),
         "question": q["question"],
@@ -133,6 +133,9 @@ def make_record(q: dict, answer: str, score: float, correct: bool) -> dict:
         "final_correct": correct,
         "final_gnosis_score": score,
     }
+    if q.get("answer_aliases"):
+        record["answer_aliases"] = q["answer_aliases"]
+    return record
 
 
 def record_is_complete(rec: dict) -> bool:

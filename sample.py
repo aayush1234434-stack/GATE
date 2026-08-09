@@ -25,7 +25,7 @@ sys.path.insert(0, GNOSIS_DIR)
 
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob, has_correctness_head
 
-from eval_utils import is_correct
+from eval_utils import is_correct, grade_record, build_question_lookup, enrich_records
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 THRESHOLD = 0.85
@@ -60,6 +60,8 @@ REGENERATE_PROMPTS = {
 
 with open(os.path.join(SCRIPT_DIR, "questions.json"), "r") as file:
     data = json.load(file)
+
+QUESTION_LOOKUP = build_question_lookup(data)
 
 
 def save_json(path, obj):
@@ -193,6 +195,8 @@ def run_pass1(model, tokenizer, existing=None):
             "final_correct": correct,
             "final_gnosis_score": score,
         }
+        if q.get("answer_aliases"):
+            record["answer_aliases"] = q["answer_aliases"]
         results.append(record)
 
         print(f"Q: {q['question']}")
@@ -222,7 +226,7 @@ def run_pass2(model, tokenizer, results):
         domain = r["domain"]
         system_prompt = REGENERATE_PROMPTS.get(domain, REGENERATE_PROMPTS["trivia"])
         answer, score = ask_gnosis(model, tokenizer, r["question"], system_prompt)
-        correct = is_correct(answer, r["ground_truth"], r.get("answer_aliases"))
+        correct = grade_record(r, answer, QUESTION_LOOKUP)
 
         r["intervened"] = True
         r["regen_answer"] = answer
