@@ -1,0 +1,5 @@
+# Install the CUDA-appropriate PyTorch build before this file when using a GPU.
+# The pinned Gnosis submodule must be initialized first.
+-e ./Gnosis/transformers
+datasets>=3.0,<4
+pytest>=7.4,<9

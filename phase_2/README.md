@@ -1,7 +1,13 @@
-# Phase 2 — Gnosis-gated regenerate vs Random control
+# Phase 2 — Gnosis-gated critique-and-revise vs Random control
 
 ## Question
-Does Gnosis’s score help pick *who* to regenerate, or would regenerating the same number of **random** questions work just as well?
+Does Gnosis’s score help pick *who* to revise, or would revising the same number of **random** questions work just as well?
+
+By default, each intervention receives the original question **and the baseline
+answer** to audit (`INTERVENTION_PROTOCOL=critique_revision_v1`). Use
+`INTERVENTION_PROTOCOL=independent_resample_v1` only to reproduce the legacy
+pilot, and describe that condition as a second independent sample rather than
+as regeneration.
 
 ## What already ran (Gnosis arm)
 - Policy: intervene if `gnosis_score < 0.85`
@@ -32,7 +38,7 @@ Script: `random_baseline.py`
 
 1. Load baseline answers/scores
 2. Pick **N** random questions (`N` = Gnosis intervene count from `results.json`, else 22)
-3. Apply the **same** regenerate prompts
+3. Apply the **same** critique-and-revise protocol
 4. Compare fixed / broke / final wrong rate vs Gnosis
 
 ### Colab

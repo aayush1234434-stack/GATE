@@ -52,24 +52,28 @@ def resolve_baseline_path() -> Path:
 
 
 def roc_auc_score(y_true, y_score):
-    try:
-        from sklearn.metrics import roc_auc_score as sklearn_auc
-        return float(sklearn_auc(y_true, y_score))
-    except ImportError:
-        return _roc_auc_manual(y_true, y_score)
+    """Dependency-free AUROC with the same average-rank tie treatment as sklearn."""
+    return _roc_auc_manual(y_true, y_score)
 
 
 def _roc_auc_manual(y_true, y_score):
-    """Rank-based AUROC without sklearn."""
+    """Rank-based AUROC using average ranks for tied scores."""
     pairs = sorted(zip(y_score, y_true), key=lambda x: x[0])
     n_pos = sum(y_true)
     n_neg = len(y_true) - n_pos
     if n_pos == 0 or n_neg == 0:
         raise ValueError("Need both positive and negative labels for AUROC")
     rank_sum = 0.0
-    for i, (_, label) in enumerate(pairs, start=1):
-        if label == 1:
-            rank_sum += i
+    index = 0
+    while index < len(pairs):
+        group_end = index + 1
+        while group_end < len(pairs) and pairs[group_end][0] == pairs[index][0]:
+            group_end += 1
+        # Ranks are one-indexed. Tied observations receive their mean rank.
+        average_rank = ((index + 1) + group_end) / 2
+        positives = sum(label for _, label in pairs[index:group_end])
+        rank_sum += average_rank * positives
+        index = group_end
     return (rank_sum - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
 
 

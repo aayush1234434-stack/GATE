@@ -1,0 +1,20 @@
+{
+  "version": "phase3_research_v1",
+  "splits": {
+    "seed": 42,
+    "ratios": {"calibration": 0.2, "validation": 0.2, "test": 0.6},
+    "stratum_key": "domain"
+  },
+  "generation": {
+    "seed": 42,
+    "n_samples": 5,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "max_new_tokens": 1536
+  },
+  "random_control_seeds": [11, 23, 37, 53, 71],
+  "evaluation": {
+    "intervention_budgets": [0.05, 0.1, 0.2, 0.3],
+    "calibrator_features": ["gnosis_score", "mean_token_logprob", "mean_token_entropy", "self_consistency", "semantic_agreement", "external_verifier_score"]
+  }
+}

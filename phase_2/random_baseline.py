@@ -1,10 +1,10 @@
 """
-Phase 2 — Random-gated regenerate control.
+Phase 2 — Random-gated critique-and-revise control.
 
 Key test: if intervening on N random questions works as well as intervening
 on Gnosis's N low-score questions, then the Gnosis score is not helping.
 
-Uses the SAME regenerate prompts as sample.py Pass 2.
+Uses the same intervention protocol as sample.py Pass 2.
 Does NOT re-run baseline — loads baseline_results.json.
 
 Usage (Colab):
@@ -17,17 +17,15 @@ Optional env:
   N_INTERVENE=22                         # override count (default: match Gnosis or 22)
   SEED=42
   SKIP_MODEL=1                           # only print comparison if both result files exist
+  INTERVENTION_PROTOCOL=critique_revision_v1  # legacy resample is opt-in
 """
 
 from __future__ import annotations
 
-import copy
-import json
 import os
 import random
 import sys
 
-import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 PHASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,10 +36,21 @@ sys.path.insert(0, GNOSIS_DIR)
 
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob, has_correctness_head
 
-from eval_utils import is_correct, grade_record, build_question_lookup, enrich_records
+from eval_utils import grade_record, build_question_lookup, enrich_records
+from experiment_state import load_json, prepare_intervention_results, save_json_atomic
+from intervention_protocol import (
+    CRITIQUE_REVISION_V1,
+    build_intervention_question,
+    intervention_instruction,
+    resolve_protocol,
+)
+from runtime import describe_runtime, model_dtype, resolve_device, set_experiment_seed
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 THRESHOLD = 0.85
+INTERVENTION_PROTOCOL = resolve_protocol(
+    os.environ.get("INTERVENTION_PROTOCOL", CRITIQUE_REVISION_V1)
+)
 
 DEFAULT_BASELINE = os.path.join(REPO_ROOT, "baseline_results.json")
 DEFAULT_GNOSIS_RESULTS = os.path.join(REPO_ROOT, "results.json")
@@ -49,60 +58,40 @@ RANDOM_RESULTS_PATH = os.path.join(PHASE_DIR, "random_results.json")
 COMPARISON_PATH = os.path.join(PHASE_DIR, "comparison.json")
 PICKED_IDS_PATH = os.path.join(PHASE_DIR, "random_picked_ids.json")
 
-REGENERATE_PROMPTS = {
-    "math": (
-        "Your previous answer may be wrong. Carefully re-solve the problem step by step. "
-        "Check each step. Put only the final answer within \\boxed{}."
-    ),
-    "trivia": (
-        "Your previous answer may be wrong. Think carefully and answer again. "
-        "Put only the final answer within \\boxed{}."
-    ),
-    "mmlu_pro": (
-        "Your previous answer may be wrong. Re-evaluate the choices carefully. "
-        "Put only the choice letter within \\boxed{}."
-    ),
-}
-
-
-def load_json(path):
-    with open(path, "r") as f:
-        return json.load(f)
-
-
 def save_json(path, obj):
-    with open(path, "w") as f:
-        json.dump(obj, f, indent=2)
+    save_json_atomic(path, obj)
     print(f"Saved: {path}")
 
 
 def load_model():
     print("Loading tokenizer and model (this may take a minute)...")
+    device = resolve_device()
+    print(f"Runtime: {describe_runtime(device)}")
     tokenizer = AutoTokenizer.from_pretrained(GNOSIS_MODEL_ID, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         GNOSIS_MODEL_ID,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=model_dtype(device),
         trust_remote_code=True,
         use_cache=False,
-    ).cuda().eval()
+    ).to(device).eval()
     if not has_correctness_head(model):
         raise RuntimeError(
             "Loaded model is missing the Gnosis correctness head. "
             "Install the custom Transformers fork from Gnosis before running."
         )
     print("Model loaded.")
-    return model, tokenizer
+    return model, tokenizer, device
 
 
-def ask_gnosis(model, tokenizer, question, system_prompt, max_new_tokens=1536):
+def ask_gnosis(model, tokenizer, device, question, system_prompt, max_new_tokens=1536):
     prompt = build_chat_prompt(tokenizer, question=question, system_prompt=system_prompt)
     answer = generate_with_hf(
-        model, tokenizer, prompt, torch.device("cuda"),
+        model, tokenizer, prompt, device,
         max_new_tokens=max_new_tokens, temperature=0.6, top_p=0.95,
     )
     score = float(
         correctness_prob(
-            model, tokenizer, prompt + answer, torch.device("cuda"),
+            model, tokenizer, prompt + answer, device,
             max_len_for_scoring=None,
         )
     )
@@ -219,18 +208,18 @@ def pick_random_indices(n_total, n_pick, seed):
     return sorted(indices[:n_pick])
 
 
-def run_random_intervention(model, tokenizer, baseline, pick_indices, question_lookup=None):
-    results = copy.deepcopy(baseline)
+def run_random_intervention(
+    model, tokenizer, device, baseline, pick_indices, seed, question_lookup=None
+):
+    results = prepare_intervention_results(
+        baseline,
+        pick_indices,
+        RANDOM_RESULTS_PATH,
+        selection="random",
+        protocol=INTERVENTION_PROTOCOL,
+        seed=seed,
+    )
     pick_set = set(pick_indices)
-
-    # Reset intervention fields from any previous Gnosis run if baseline was a full results dump
-    for r in results:
-        r["intervened"] = False
-        r["final_answer"] = r["baseline_answer"]
-        r["final_correct"] = r["baseline_correct"]
-        r["final_gnosis_score"] = r["gnosis_score"]
-        for k in ("regen_answer", "regen_correct", "regen_gnosis_score", "selection"):
-            r.pop(k, None)
 
     print("\n" + "=" * 60)
     print(f"RANDOM PASS: regenerate on {len(pick_indices)} randomly selected questions")
@@ -243,11 +232,18 @@ def run_random_intervention(model, tokenizer, baseline, pick_indices, question_l
             continue
 
         domain = r.get("domain", "trivia")
-        system_prompt = REGENERATE_PROMPTS.get(domain, REGENERATE_PROMPTS["trivia"])
-        answer, score = ask_gnosis(model, tokenizer, r["question"], system_prompt)
+        system_prompt = intervention_instruction(domain)
+        intervention_question = build_intervention_question(
+            r["question"], r["baseline_answer"], INTERVENTION_PROTOCOL
+        )
+        answer, score = ask_gnosis(
+            model, tokenizer, device, intervention_question, system_prompt
+        )
         correct = grade_record(r, answer, question_lookup)
 
         r["selection"] = "random"
+        r["intervention_protocol"] = INTERVENTION_PROTOCOL
+        r["intervention_seed"] = seed
         r["intervened"] = True
         r["regen_answer"] = answer
         r["regen_correct"] = correct
@@ -296,6 +292,8 @@ def main():
         if os.path.exists(alt):
             gnosis_path = alt
     seed = int(os.environ.get("SEED", "42"))
+    set_experiment_seed(seed)
+    print(f"Experiment seed: {seed}")
     skip_model = os.environ.get("SKIP_MODEL", "").strip() in {"1", "true", "True", "yes"}
 
     baseline = load_json(baseline_path)
@@ -329,6 +327,8 @@ def main():
     picked_meta = {
         "seed": seed,
         "n_intervene": n_intervene,
+        "selection": "random",
+        "intervention_protocol": INTERVENTION_PROTOCOL,
         "indices": pick_indices,
         "ids": [baseline[i].get("id") for i in pick_indices],
         "questions": [baseline[i]["question"] for i in pick_indices],
@@ -341,16 +341,21 @@ def main():
             raise SystemExit("SKIP_MODEL=1 but phase_2/random_results.json is missing.")
         random_results = load_json(RANDOM_RESULTS_PATH)
     else:
-        model, tokenizer = load_model()
+        model, tokenizer, device = load_model()
         random_results = run_random_intervention(
-            model, tokenizer, baseline, pick_indices, question_lookup
+            model, tokenizer, device, baseline, pick_indices, seed, question_lookup
         )
         save_json(RANDOM_RESULTS_PATH, random_results)
 
     random_summary = summarize(random_results, "RANDOM-GATED REGENERATE")
     print_summary(random_summary)
 
-    comparison = {"random": random_summary, "seed": seed, "n_intervene": n_intervene}
+    comparison = {
+        "random": random_summary,
+        "seed": seed,
+        "n_intervene": n_intervene,
+        "intervention_protocol": INTERVENTION_PROTOCOL,
+    }
 
     if os.path.exists(gnosis_path):
         gnosis_results = load_json(gnosis_path)

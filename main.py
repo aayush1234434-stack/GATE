@@ -6,8 +6,6 @@ Usage: python main.py
 
 import os
 import sys
-import torch
-
 # Resolve paths relative to this script's own location — works no matter
 # what folder the repo gets cloned into, as long as Gnosis/ sits next to main.py
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +16,7 @@ os.chdir(GNOSIS_DIR)
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from src.demo import build_chat_prompt, generate_with_hf, correctness_prob
+from runtime import describe_runtime, model_dtype, resolve_device, set_experiment_seed
 
 GNOSIS_MODEL_ID = "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid"
 
@@ -30,25 +29,27 @@ SYSTEM_PROMPTS = {
 
 def load_model():
     print("Loading tokenizer and model (this may take a minute)...")
+    device = resolve_device()
+    print(f"Runtime: {describe_runtime(device)}")
     tokenizer = AutoTokenizer.from_pretrained(GNOSIS_MODEL_ID, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        GNOSIS_MODEL_ID, dtype=torch.bfloat16, trust_remote_code=True,
-    ).cuda().eval()
+        GNOSIS_MODEL_ID, torch_dtype=model_dtype(device), trust_remote_code=True,
+    ).to(device).eval()
     print("Model loaded.")
-    return model, tokenizer
+    return model, tokenizer, device
 
 
-def ask_gnosis(model, tokenizer, question, task_type="trivia", max_new_tokens=512):
+def ask_gnosis(model, tokenizer, device, question, task_type="trivia", max_new_tokens=512):
     system_prompt = SYSTEM_PROMPTS[task_type]
     prompt = build_chat_prompt(tokenizer, question=question, system_prompt=system_prompt)
 
     answer = generate_with_hf(
-        model, tokenizer, prompt, torch.device("cuda"),
+        model, tokenizer, prompt, device,
         max_new_tokens=max_new_tokens, temperature=0.6, top_p=0.95
     )
 
     score = correctness_prob(
-        model, tokenizer, prompt + answer, torch.device("cuda"),
+        model, tokenizer, prompt + answer, device,
         max_len_for_scoring=None
     )
 
@@ -56,12 +57,15 @@ def ask_gnosis(model, tokenizer, question, task_type="trivia", max_new_tokens=51
 
 
 if __name__ == "__main__":
-    model, tokenizer = load_model()
+    seed = int(os.environ.get("SEED", "42"))
+    set_experiment_seed(seed)
+    print(f"Experiment seed: {seed}")
+    model, tokenizer, device = load_model()
 
     question = "How many r's are in strawberry?"
     task_type = "trivia"
 
-    answer, score = ask_gnosis(model, tokenizer, question, task_type=task_type)
+    answer, score = ask_gnosis(model, tokenizer, device, question, task_type=task_type)
 
     print("\n" + "=" * 60)
     print(f"Question: {question}")

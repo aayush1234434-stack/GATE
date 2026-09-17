@@ -1,4 +1,9 @@
-"""Answer correctness checks shared across experiment scripts."""
+"""Conservative answer correctness checks shared across experiment scripts."""
+
+from __future__ import annotations
+
+import re
+import unicodedata
 
 
 def build_question_lookup(questions: list[dict]) -> dict:
@@ -57,22 +62,89 @@ def grading_fields(record: dict, lookup: dict | None = None) -> tuple[str, list 
 def grade_record(record: dict, answer: str, lookup: dict | None = None) -> bool:
     """Grade an answer against a result record, using aliases when available."""
     ground_truth, aliases = grading_fields(record, lookup)
-    return is_correct(answer, ground_truth, aliases)
+    return is_correct(answer, ground_truth, aliases, record.get("domain"))
 
 
-def is_correct(answer, ground_truth, answer_aliases=None) -> bool:
-    """True if ground_truth or any alias appears in the model answer (case-insensitive)."""
-    answer_l = answer.strip().lower()
+def _boxed_contents(text: str) -> list[str]:
+    """Extract balanced LaTex ``\\boxed{...}`` contents, preserving the final answer."""
+    values = []
+    start = 0
+    marker = "\\boxed{"
+    while True:
+        index = text.find(marker, start)
+        if index < 0:
+            return values
+        depth = 1
+        cursor = index + len(marker)
+        content_start = cursor
+        while cursor < len(text) and depth:
+            if text[cursor] == "{":
+                depth += 1
+            elif text[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        if depth == 0:
+            values.append(text[content_start : cursor - 1])
+        start = cursor
+
+
+def _normalize(value: object) -> str:
+    """Normalize harmless formatting while retaining mathematical operators."""
+    text = unicodedata.normalize("NFKC", str(value)).lower().strip()
+    text = text.replace("\\left", "").replace("\\right", "")
+    text = text.replace("−", "-")
+    text = re.sub(r"(?<=\d),(?=\d)", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" $.,;:!?")
+
+
+def _normalize_math(value: object) -> str:
+    """Normalize common equivalent LaTex forms used by the bundled math set."""
+    text = _normalize(value)
+    # Apply repeatedly so simple nested fractions are handled from the inside out.
+    previous = None
+    while previous != text:
+        previous = text
+        text = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"\1/\2", text)
+        text = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", text)
+    text = text.replace("\\pi", "pi").replace("{", "").replace("}", "")
+    return re.sub(r"\s+", "", text)
+
+
+def _whole_answer_match(answer: str, candidate: str) -> bool:
+    """Match a candidate as a complete token sequence, never as a raw substring."""
+    if answer == candidate:
+        return True
+    if not candidate:
+        return False
+    # Letter/digit boundaries prevent e.g. "art" matching "partial" or "4" matching "14".
+    pattern = rf"(?<![0-9a-z]){re.escape(candidate)}(?![0-9a-z])"
+    return re.search(pattern, answer) is not None
+
+
+def is_correct(answer, ground_truth, answer_aliases=None, domain: str | None = None) -> bool:
+    """Conservatively grade an answer against ground truth and official aliases.
+
+    Prefer the model's final ``\\boxed{...}`` answer when present. Otherwise,
+    accept an exact normalized answer or a whole-token textual mention. This
+    avoids the old raw-substring rule while still supporting concise trivia
+    answers embedded in a sentence. ``domain`` is reserved for future
+    task-specific normalizers and keeps all callers on a stable API.
+    """
+    normalizer = _normalize_math if domain == "math" else _normalize
     candidates = [str(ground_truth).strip()]
     if answer_aliases:
         candidates.extend(str(a).strip() for a in answer_aliases)
 
     seen = set()
     for candidate in candidates:
-        key = candidate.lower()
+        key = normalizer(candidate)
         if not key or key in seen:
             continue
         seen.add(key)
-        if key in answer_l:
+        boxed = [normalizer(value) for value in _boxed_contents(str(answer))]
+        if any(key == value for value in boxed):
+            return True
+        if _whole_answer_match(normalizer(answer), key):
             return True
     return False

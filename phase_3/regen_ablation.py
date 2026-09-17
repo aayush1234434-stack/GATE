@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Phase 3 — Scaled regeneration ablation (trivia, no RAG).
+Phase 3 — Scaled critique-and-revise ablation (trivia, no RAG).
 
-Compares Gnosis-gated regenerate vs random-matched control on Phase 3 baseline.
-Same regenerate prompts as sample.py / Phase 2 (stricter prompt, no RAG).
+Compares Gnosis-gated critique-and-revise vs a random-matched control on the
+Phase 3 baseline. The default protocol exposes the baseline answer for audit.
 
 Usage (Colab):
   export BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json
@@ -19,19 +19,18 @@ Env:
   SKIP_RANDOM=1           # skip random arm
   GNOSIS_OUT=...          # default phase_3/artifacts/regen_gnosis_results.json
   RANDOM_OUT=...          # default phase_3/artifacts/regen_random_results.json
+  RANDOM_SEEDS=11,23,37   # repeated random matched controls (default: SEED)
+  INTERVENTION_PROTOCOL=critique_revision_v1  # default; legacy resample is opt-in
 """
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import random
 import sys
-import tempfile
 from pathlib import Path
 
-import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +42,14 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(GNOSIS_DIR))
 
 from eval_utils import build_question_lookup, enrich_records, grade_record
+from experiment_state import load_json, prepare_intervention_results, save_json_atomic
+from intervention_protocol import (
+    CRITIQUE_REVISION_V1,
+    build_intervention_question,
+    intervention_instruction,
+    resolve_protocol,
+)
+from runtime import describe_runtime, model_dtype, resolve_device, set_experiment_seed
 from src.demo import build_chat_prompt, correctness_prob, generate_with_hf, has_correctness_head
 
 # Reuse Phase 2 summarize / comparison helpers
@@ -54,36 +61,26 @@ THRESHOLD = float(os.environ.get("THRESHOLD", "0.50"))
 DOMAIN = os.environ.get("DOMAIN", "trivia").strip()
 SEED = int(os.environ.get("SEED", "42"))
 ARM = os.environ.get("ARM", "both").strip().lower()
-
-REGENERATE_PROMPTS = {
-    "math": (
-        "Your previous answer may be wrong. Carefully re-solve the problem step by step. "
-        "Check each step. Put only the final answer within \\boxed{}."
-    ),
-    "trivia": (
-        "Your previous answer may be wrong. Think carefully and answer again. "
-        "Put only the final answer within \\boxed{}."
-    ),
-}
+CONFIG_PATH = os.environ.get("CONFIG_PATH", "").strip()
+if CONFIG_PATH:
+    with open(CONFIG_PATH, "r") as config_file:
+        EXPERIMENT_CONFIG = json.load(config_file)
+else:
+    EXPERIMENT_CONFIG = {}
+INTERVENTION_PROTOCOL = resolve_protocol(
+    os.environ.get("INTERVENTION_PROTOCOL", CRITIQUE_REVISION_V1)
+)
 
 
-def load_json(path: Path):
-    with open(path, "r") as f:
-        return json.load(f)
+def parse_seeds(value: str, fallback: int) -> list[int]:
+    seeds = [int(part.strip()) for part in value.split(",") if part.strip()]
+    return seeds or [fallback]
 
 
-def save_json_atomic(path: Path, obj) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(obj, f, indent=2)
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
-    print(f"Saved: {path}")
+_configured_random_seeds = EXPERIMENT_CONFIG.get("random_control_seeds", [SEED])
+RANDOM_SEEDS = parse_seeds(
+    os.environ.get("RANDOM_SEEDS", ",".join(str(seed) for seed in _configured_random_seeds)), SEED
+)
 
 
 def resolve_baseline_path() -> Path:
@@ -105,33 +102,35 @@ def resolve_questions_path() -> Path:
 
 def load_model():
     print("Loading tokenizer and model...")
+    device = resolve_device()
+    print(f"Runtime: {describe_runtime(device)}")
     tokenizer = AutoTokenizer.from_pretrained(GNOSIS_MODEL_ID, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         GNOSIS_MODEL_ID,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=model_dtype(device),
         trust_remote_code=True,
         use_cache=False,
-    ).cuda().eval()
+    ).to(device).eval()
     if not has_correctness_head(model):
         raise RuntimeError("Install Gnosis Transformers fork before running.")
     print("Model loaded.")
-    return model, tokenizer
+    return model, tokenizer, device
 
 
-def ask_gnosis(model, tokenizer, question, system_prompt, max_new_tokens=1536):
+def ask_gnosis(model, tokenizer, device, question, system_prompt, max_new_tokens=1536):
     prompt = build_chat_prompt(tokenizer, question=question, system_prompt=system_prompt)
     answer = generate_with_hf(
         model,
         tokenizer,
         prompt,
-        torch.device("cuda"),
+        device,
         max_new_tokens=max_new_tokens,
         temperature=0.6,
         top_p=0.95,
     )
     score = float(
         correctness_prob(
-            model, tokenizer, prompt + answer, torch.device("cuda"), max_len_for_scoring=None
+            model, tokenizer, prompt + answer, device, max_len_for_scoring=None
         )
     )
     return answer, score
@@ -154,38 +153,29 @@ def random_pick_indices(n_total: int, n_pick: int, seed: int) -> list[int]:
     return sorted(indices[:n_pick])
 
 
-def reset_intervention_fields(results: list[dict]) -> None:
-    for r in results:
-        r["intervened"] = False
-        r["final_answer"] = r["baseline_answer"]
-        r["final_correct"] = r["baseline_correct"]
-        r["final_gnosis_score"] = r["gnosis_score"]
-        for k in ("regen_answer", "regen_correct", "regen_gnosis_score", "selection"):
-            r.pop(k, None)
-
-
 def run_regen_arm(
     model,
     tokenizer,
+    device,
     subset: list[dict],
     pick_indices: list[int],
     question_lookup: dict,
     selection: str,
     out_path: Path,
+    generation_seed: int,
 ) -> list[dict]:
-    pick_set = set(pick_indices)
-    if out_path.exists():
-        results = load_json(out_path)
-        if len(results) != len(subset):
-            results = copy.deepcopy(subset)
-            reset_intervention_fields(results)
-    else:
-        results = copy.deepcopy(subset)
-        reset_intervention_fields(results)
+    results = prepare_intervention_results(
+        subset,
+        pick_indices,
+        out_path,
+        selection=selection,
+        protocol=INTERVENTION_PROTOCOL,
+        seed=generation_seed,
+    )
 
     done = {
         i
-        for i in pick_set
+        for i in pick_indices
         if results[i].get("intervened") and results[i].get("regen_answer") is not None
     }
     remaining = [i for i in pick_indices if i not in done]
@@ -199,11 +189,18 @@ def run_regen_arm(
             continue
         r = results[i]
         domain = r.get("domain", "trivia")
-        system_prompt = REGENERATE_PROMPTS.get(domain, REGENERATE_PROMPTS["trivia"])
-        answer, score = ask_gnosis(model, tokenizer, r["question"], system_prompt)
+        system_prompt = intervention_instruction(domain)
+        intervention_question = build_intervention_question(
+            r["question"], r["baseline_answer"], INTERVENTION_PROTOCOL
+        )
+        answer, score = ask_gnosis(
+            model, tokenizer, device, intervention_question, system_prompt
+        )
         correct = grade_record(r, answer, question_lookup)
 
         r["selection"] = selection
+        r["intervention_protocol"] = INTERVENTION_PROTOCOL
+        r["intervention_seed"] = generation_seed
         r["intervened"] = True
         r["regen_answer"] = answer
         r["regen_correct"] = correct
@@ -217,19 +214,20 @@ def run_regen_arm(
             f"regen_ok={correct} score={score:.4f}"
         )
         save_json_atomic(out_path, results)
+        print(f"Saved: {out_path}")
 
     return results
 
 
 def main():
+    set_experiment_seed(SEED)
+    print(f"Experiment seed: {SEED}")
     baseline_path = resolve_baseline_path()
     questions_path = resolve_questions_path()
     gnosis_out = Path(
         os.environ.get("GNOSIS_OUT", ARTIFACTS / "regen_gnosis_results.json")
     )
-    random_out = Path(
-        os.environ.get("RANDOM_OUT", ARTIFACTS / "regen_random_results.json")
-    )
+    random_out_setting = os.environ.get("RANDOM_OUT", "").strip()
     comparison_out = Path(
         os.environ.get("COMPARISON_OUT", ARTIFACTS / "regen_comparison.json")
     )
@@ -267,36 +265,60 @@ def main():
     if not gnosis_indices:
         raise SystemExit("No questions flagged at this threshold — lower THRESHOLD or change DOMAIN.")
 
-    random_indices = random_pick_indices(len(subset), len(gnosis_indices), SEED)
+    random_indices_by_seed = {
+        seed: random_pick_indices(len(subset), len(gnosis_indices), seed)
+        for seed in RANDOM_SEEDS
+    }
 
-    model, tokenizer = load_model()
+    model, tokenizer, device = load_model()
 
     gnosis_results = None
-    random_results = None
+    random_results_by_seed: dict[int, list[dict]] = {}
 
     if run_gnosis:
         gnosis_results = run_regen_arm(
-            model, tokenizer, subset, gnosis_indices, lookup, "gnosis", gnosis_out
+            model, tokenizer, device, subset, gnosis_indices, lookup, "gnosis", gnosis_out, SEED
         )
     elif gnosis_out.exists():
         gnosis_results = load_json(gnosis_out)
 
-    if run_random:
-        random_results = run_regen_arm(
-            model, tokenizer, subset, random_indices, lookup, "random", random_out
-        )
-    elif random_out.exists():
-        random_results = load_json(random_out)
+    for random_seed, random_indices in random_indices_by_seed.items():
+        if random_out_setting:
+            if len(RANDOM_SEEDS) > 1 and "{seed}" not in random_out_setting:
+                raise SystemExit("Use RANDOM_OUT with a {seed} placeholder when RANDOM_SEEDS has multiple values.")
+            random_out = Path(random_out_setting.format(seed=random_seed))
+        elif len(RANDOM_SEEDS) == 1:
+            random_out = ARTIFACTS / "regen_random_results.json"
+        else:
+            random_out = ARTIFACTS / f"regen_random_seed_{random_seed}.json"
+
+        if run_random:
+            set_experiment_seed(random_seed)
+            random_results_by_seed[random_seed] = run_regen_arm(
+                model,
+                tokenizer,
+                device,
+                subset,
+                random_indices,
+                lookup,
+                "random",
+                random_out,
+                random_seed,
+            )
+        elif random_out.exists():
+            random_results_by_seed[random_seed] = load_json(random_out)
 
     comparison = {
         "baseline_path": str(baseline_path),
         "domain": DOMAIN,
         "threshold": THRESHOLD,
         "seed": SEED,
+        "intervention_protocol": INTERVENTION_PROTOCOL,
         "n_subset": len(subset),
         "n_intervene": len(gnosis_indices),
         "gnosis_indices": gnosis_indices,
-        "random_indices": random_indices,
+        "random_seeds": RANDOM_SEEDS,
+        "random_indices_by_seed": random_indices_by_seed,
     }
 
     if gnosis_results:
@@ -304,23 +326,29 @@ def main():
         print_summary(gnosis_summary)
         comparison["gnosis"] = gnosis_summary
 
-    if random_results:
-        random_summary = summarize(random_results, f"RANDOM REGEN (matched N, {DOMAIN})")
+    random_summaries = {}
+    for random_seed, random_results in random_results_by_seed.items():
+        random_summary = summarize(
+            random_results, f"RANDOM REGEN (matched N, {DOMAIN}, seed={random_seed})"
+        )
         print_summary(random_summary)
-        comparison["random"] = random_summary
+        random_summaries[str(random_seed)] = random_summary
+    if random_summaries:
+        comparison["random_by_seed"] = random_summaries
 
-    if gnosis_results and random_results:
-        print_comparison(comparison["gnosis"], comparison["random"])
-        g_red = comparison["gnosis"]["hallucination_reduction"]
-        r_red = comparison["random"]["hallucination_reduction"]
-        if g_red > r_red:
-            comparison["verdict"] = "gnosis_better"
-        elif r_red > g_red:
-            comparison["verdict"] = "random_better"
-        else:
-            comparison["verdict"] = "tie"
+    if gnosis_results and random_summaries:
+        verdict_by_seed = {}
+        for random_seed, random_summary in random_summaries.items():
+            print_comparison(comparison["gnosis"], random_summary)
+            g_red = comparison["gnosis"]["hallucination_reduction"]
+            r_red = random_summary["hallucination_reduction"]
+            verdict_by_seed[random_seed] = (
+                "gnosis_better" if g_red > r_red else "random_better" if r_red > g_red else "tie"
+            )
+        comparison["verdict_by_seed"] = verdict_by_seed
 
     save_json_atomic(comparison_out, comparison)
+    print(f"Saved: {comparison_out}")
     print(f"\nDone. Comparison: {comparison_out}")
 
 

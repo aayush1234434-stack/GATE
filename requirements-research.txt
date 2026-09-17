@@ -1,0 +1,3 @@
+-r requirements.txt
+# Semantic-agreement baseline. Downloaded embedding model is configured at run time.
+sentence-transformers>=3.0,<6

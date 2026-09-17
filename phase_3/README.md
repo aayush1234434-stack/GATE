@@ -33,6 +33,22 @@ os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
 
 Full copy-paste cells: [COLAB.md](./COLAB.md)
 
+### Paper-facing configuration
+
+Build a stratified calibration/validation/test manifest **before** generation,
+then pass it with the versioned configuration. This run records token
+log-probability, entropy, and five-sample self-consistency by default:
+
+```bash
+python scripts/build_splits.py \
+  --input phase_3/artifacts/questions_700.json \
+  --output phase_3/artifacts/splits.json
+
+CONFIG_PATH=configs/phase3_research.json \
+SPLITS_PATH=phase_3/artifacts/splits.json \
+PYTHONPATH=Gnosis python phase_3/run_baseline.py
+```
+
 ## If you see long JSON with LaTeX / `[asy]` blocks
 
 That is **normal**, not an error. Competition-math prompts include diagrams and long problem text.
@@ -66,9 +82,16 @@ BASELINE_PATH=/content/drive/MyDrive/gate_phase3_baseline.json python phase_3/bo
 
 Output: `phase_3/artifacts/bootstrap.json` (AUROC + threshold sweep 95% CIs)
 
-## Regeneration ablation — trivia, no RAG (GPU)
+## Critique-and-revise ablation — trivia, no RAG (GPU)
 
-Same regenerate prompt as Phase 2. Gnosis-gated vs random-matched control. Resumes from checkpoint.
+The default protocol supplies the baseline answer for critique and revision.
+Gnosis-gated vs random-matched control. Resumes only compatible checkpoints.
+Set `INTERVENTION_PROTOCOL=independent_resample_v1` only to reproduce the
+legacy independent-resampling condition.
+
+With `CONFIG_PATH=configs/phase3_research.json`, five seeded random arms are
+run and saved separately. This estimates the random-control variance instead
+of relying on one favorable seed.
 
 ```python
 import os
