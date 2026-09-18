@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 import math
+import time
 
 import torch
 
@@ -24,6 +25,7 @@ def generate_with_hf_metrics(
     """Generate an answer and capture per-token log-probability and entropy."""
     enc = tokenizer(prompt, return_tensors="pt").to(device)
     input_len = enc["input_ids"].shape[1]
+    started = time.perf_counter()
     generated = model.generate(
         **enc,
         max_new_tokens=max_new_tokens,
@@ -33,6 +35,7 @@ def generate_with_hf_metrics(
         return_dict_in_generate=True,
         output_scores=True,
     )
+    elapsed = time.perf_counter() - started
     token_ids = generated.sequences[0, input_len:]
     answer = tokenizer.decode(token_ids, skip_special_tokens=True).strip()
 
@@ -48,6 +51,7 @@ def generate_with_hf_metrics(
         "min_token_logprob": min(log_probs) if log_probs else None,
         "mean_token_entropy": sum(entropies) / len(entropies) if entropies else None,
         "max_token_entropy": max(entropies) if entropies else None,
+        "generation_seconds": elapsed,
     }
 
 

@@ -11,7 +11,9 @@ Usage (Colab):
   !PYTHONPATH=/content/GATE/Gnosis python phase_3/regen_ablation.py
 
 Env:
-  THRESHOLD=0.50          # intervene if gnosis_score < THRESHOLD (default 0.50)
+  BUDGET=0.10             # paper-facing: intervene on this highest-risk fraction
+  THRESHOLD=0.50          # legacy alternative: intervene if gnosis_score < threshold
+  SPLIT=test               # paper-facing split; use all only for legacy artifacts
   DOMAIN=trivia           # default trivia only
   SEED=42                 # random arm seed
   ARM=both                # gnosis | random | both (default both)
@@ -26,6 +28,7 @@ Env:
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import sys
@@ -43,6 +46,7 @@ sys.path.insert(0, str(GNOSIS_DIR))
 
 from eval_utils import build_question_lookup, enrich_records, grade_record
 from experiment_state import load_json, prepare_intervention_results, save_json_atomic
+from generation_metrics import generate_with_hf_metrics
 from intervention_protocol import (
     CRITIQUE_REVISION_V1,
     build_intervention_question,
@@ -50,7 +54,7 @@ from intervention_protocol import (
     resolve_protocol,
 )
 from runtime import describe_runtime, model_dtype, resolve_device, set_experiment_seed
-from src.demo import build_chat_prompt, correctness_prob, generate_with_hf, has_correctness_head
+from src.demo import build_chat_prompt, correctness_prob, has_correctness_head
 
 # Reuse Phase 2 summarize / comparison helpers
 sys.path.insert(0, str(REPO_ROOT / "phase_2"))
@@ -58,7 +62,7 @@ from random_baseline import print_comparison, print_summary, summarize
 
 GNOSIS_MODEL_ID = os.environ.get("GNOSIS_MODEL_ID", "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid")
 THRESHOLD = float(os.environ.get("THRESHOLD", "0.50"))
-DOMAIN = os.environ.get("DOMAIN", "trivia").strip()
+DOMAIN = os.environ.get("DOMAIN", "").strip()
 SEED = int(os.environ.get("SEED", "42"))
 ARM = os.environ.get("ARM", "both").strip().lower()
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "").strip()
@@ -67,9 +71,18 @@ if CONFIG_PATH:
         EXPERIMENT_CONFIG = json.load(config_file)
 else:
     EXPERIMENT_CONFIG = {}
+if not DOMAIN:
+    DOMAIN = "all" if EXPERIMENT_CONFIG else "trivia"
 INTERVENTION_PROTOCOL = resolve_protocol(
     os.environ.get("INTERVENTION_PROTOCOL", CRITIQUE_REVISION_V1)
 )
+BUDGET_SETTING = os.environ.get(
+    "BUDGET", str(EXPERIMENT_CONFIG.get("evaluation", {}).get("primary_intervention_budget", ""))
+).strip()
+BUDGET = float(BUDGET_SETTING) if BUDGET_SETTING else None
+if BUDGET is not None and not 0 < BUDGET <= 1:
+    raise ValueError("BUDGET must be in (0, 1]")
+SPLIT = os.environ.get("SPLIT", "test" if EXPERIMENT_CONFIG else "all").strip()
 
 
 def parse_seeds(value: str, fallback: int) -> list[int]:
@@ -97,7 +110,7 @@ def resolve_questions_path() -> Path:
     explicit = os.environ.get("QUESTIONS_PATH", "").strip()
     if explicit:
         return Path(explicit)
-    return ARTIFACTS / "questions_700.json"
+    return ARTIFACTS / ("questions_v1.json" if EXPERIMENT_CONFIG else "questions_700.json")
 
 
 def load_model():
@@ -119,7 +132,7 @@ def load_model():
 
 def ask_gnosis(model, tokenizer, device, question, system_prompt, max_new_tokens=1536):
     prompt = build_chat_prompt(tokenizer, question=question, system_prompt=system_prompt)
-    answer = generate_with_hf(
+    answer, generation_metrics = generate_with_hf_metrics(
         model,
         tokenizer,
         prompt,
@@ -133,17 +146,30 @@ def ask_gnosis(model, tokenizer, device, question, system_prompt, max_new_tokens
             model, tokenizer, prompt + answer, device, max_len_for_scoring=None
         )
     )
-    return answer, score
+    return answer, score, generation_metrics
 
 
-def filter_subset(records: list[dict], domain: str) -> list[dict]:
-    if not domain or domain.lower() == "all":
-        return records
-    return [r for r in records if r.get("domain") == domain]
+def filter_subset(records: list[dict], domain: str, split: str) -> list[dict]:
+    filtered = records
+    if split and split.lower() != "all":
+        filtered = [record for record in filtered if record.get("split") == split]
+    if domain and domain.lower() != "all":
+        filtered = [record for record in filtered if record.get("domain") == domain]
+    return filtered
 
 
 def gnosis_pick_indices(subset: list[dict], threshold: float) -> list[int]:
     return [i for i, r in enumerate(subset) if r["gnosis_score"] < threshold]
+
+
+def gnosis_pick_budgeted_indices(subset: list[dict], budget: float) -> list[int]:
+    """Select exactly the fixed intervention budget, preferring lower scores."""
+    if not subset:
+        return []
+    count = max(1, math.ceil(len(subset) * budget))
+    return sorted(
+        sorted(range(len(subset)), key=lambda index: subset[index]["gnosis_score"])[:count]
+    )
 
 
 def random_pick_indices(n_total: int, n_pick: int, seed: int) -> list[int]:
@@ -193,7 +219,7 @@ def run_regen_arm(
         intervention_question = build_intervention_question(
             r["question"], r["baseline_answer"], INTERVENTION_PROTOCOL
         )
-        answer, score = ask_gnosis(
+        answer, score, generation_metrics = ask_gnosis(
             model, tokenizer, device, intervention_question, system_prompt
         )
         correct = grade_record(r, answer, question_lookup)
@@ -205,6 +231,7 @@ def run_regen_arm(
         r["regen_answer"] = answer
         r["regen_correct"] = correct
         r["regen_gnosis_score"] = score
+        r["regen_generation_metrics"] = generation_metrics
         r["final_answer"] = answer
         r["final_correct"] = correct
         r["final_gnosis_score"] = score
@@ -255,11 +282,26 @@ def main():
             ]
         )
 
-    subset = filter_subset(records, DOMAIN)
-    print(f"Loaded {len(records)} baseline records; subset domain={DOMAIN!r} n={len(subset)}")
-    print(f"Threshold τ={THRESHOLD}")
+    subset = filter_subset(records, DOMAIN, SPLIT)
+    print(f"Loaded {len(records)} baseline records; subset split={SPLIT!r} domain={DOMAIN!r} n={len(subset)}")
+    if not subset:
+        raise SystemExit("No records match DOMAIN/SPLIT. Create split-assigned baseline artifacts or set SPLIT=all for legacy data.")
+    baseline_model_ids = {record.get("model_id") for record in subset if record.get("model_id")}
+    if baseline_model_ids and baseline_model_ids != {GNOSIS_MODEL_ID}:
+        raise SystemExit(
+            "Baseline model_id does not match GNOSIS_MODEL_ID. Regeneration must use the same "
+            "checkpoint as its baseline; write a separate artifact path for another model."
+        )
+    if BUDGET is None:
+        print(f"Threshold τ={THRESHOLD}")
+    else:
+        print(f"Fixed intervention budget={BUDGET:.3f}")
 
-    gnosis_indices = gnosis_pick_indices(subset, THRESHOLD)
+    gnosis_indices = (
+        gnosis_pick_budgeted_indices(subset, BUDGET)
+        if BUDGET is not None
+        else gnosis_pick_indices(subset, THRESHOLD)
+    )
     print(f"Gnosis would flag {len(gnosis_indices)} / {len(subset)} in subset")
 
     if not gnosis_indices:
@@ -311,7 +353,9 @@ def main():
     comparison = {
         "baseline_path": str(baseline_path),
         "domain": DOMAIN,
+        "split": SPLIT,
         "threshold": THRESHOLD,
+        "intervention_budget": BUDGET,
         "seed": SEED,
         "intervention_protocol": INTERVENTION_PROTOCOL,
         "n_subset": len(subset),

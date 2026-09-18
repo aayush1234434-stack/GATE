@@ -52,15 +52,15 @@ If `Gnosis` submodule is empty after clone:
 
 ## Cell 3 — Build questions (only if you don't have them yet)
 
-Skip this if `questions_700.json` already exists on GitHub or in the repo.
+Skip this if `questions_v1.json` already exists on Drive or in the repo.
 
 ```python
 %cd /content/GATE
 !pip install -q datasets
-!python phase_3/build_question_set.py
+!python phase_3/build_question_set.py --config configs/benchmark_v1.json --output phase_3/artifacts/questions_v1.json
 ```
 
-Output: `phase_3/artifacts/questions_700.json` (800 questions)
+Output: `phase_3/artifacts/questions_v1.json` (1,800 questions) and a source manifest.
 
 ---
 
@@ -85,7 +85,7 @@ if os.path.exists(CHECKPOINT):
     with open(CHECKPOINT) as f:
         data = json.load(f)
     correct = sum(r["baseline_correct"] for r in data)
-    print(f"Checkpoint found: {len(data)}/800 done ({correct} correct)")
+    print(f"Checkpoint found: {len(data)} done ({correct} correct)")
 else:
     print("No checkpoint yet — starting from question 1")
 ```
@@ -100,6 +100,8 @@ else:
 import os
 
 os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
+os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_v1.json"
+os.environ["CONFIG_PATH"] = "/content/GATE/configs/phase3_research.json"
 
 %cd /content/GATE
 !PYTHONPATH=/content/GATE/Gnosis python phase_3/run_baseline.py
@@ -125,7 +127,14 @@ with open("/content/drive/MyDrive/gate_phase3_baseline.json") as f:
 
 ---
 
-## After all 800 questions finish
+## After the baseline finishes
+
+### Confirm the predeclared error target (no GPU)
+
+```python
+%cd /content/GATE
+!python scripts/check_error_target.py --records /content/drive/MyDrive/gate_phase3_baseline.json
+```
 
 ### AUROC (no GPU)
 
@@ -146,18 +155,32 @@ os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
 !python phase_3/threshold_sweep.py
 ```
 
-### Regeneration ablation — trivia, τ=0.50 (GPU, resumable)
+### Regeneration ablation — test split, fixed 10% budget (GPU, resumable)
 
 ```python
 %cd /content/GATE
 import os
 os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
-os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_700.json"
-os.environ["THRESHOLD"] = "0.50"
+os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_v1.json"
+os.environ["CONFIG_PATH"] = "/content/GATE/configs/phase3_research.json"
+os.environ["SPLIT"] = "test"
+os.environ["BUDGET"] = "0.10"
 !PYTHONPATH=/content/GATE/Gnosis python phase_3/regen_ablation.py
 ```
 
 Re-run to resume. After gnosis arm finishes: `os.environ["SKIP_GNOSIS"] = "1"` then re-run for random only.
+
+### Final statistical analysis (no GPU)
+
+```python
+%cd /content/GATE
+!python scripts/analyze_experiment.py \
+  --baseline /content/drive/MyDrive/gate_phase3_baseline.json \
+  --split test \
+  --gnosis phase_3/artifacts/regen_gnosis_results.json \
+  --random phase_3/artifacts/regen_random_seed_11.json \
+  --output /content/drive/MyDrive/gate_phase3_statistics.json
+```
 
 ### Download results to your laptop
 

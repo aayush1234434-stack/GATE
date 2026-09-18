@@ -4,16 +4,19 @@
 
 ## Build question set (Colab, no GPU)
 
-Only needed once if `questions_700.json` is not already in the repo.
+Only needed once. The paper-facing benchmark is 1,800 predeclared questions
+across trivia, competition math, science reasoning, and broad knowledge. It
+stores source provenance for every question and uses held-out source splits
+where answer labels are public.
 
 ```python
 %cd /content/GATE
 !git pull
 !pip install -q datasets
-!python phase_3/build_question_set.py
+!python phase_3/build_question_set.py --config configs/benchmark_v1.json --output phase_3/artifacts/questions_v1.json
 ```
 
-Output: `phase_3/artifacts/questions_700.json` (800 questions: 400 trivia + 400 math)
+Output: `phase_3/artifacts/questions_v1.json` and a source manifest.
 
 ## Run baseline + Gnosis scores (Pass 1, resumable)
 
@@ -41,12 +44,20 @@ log-probability, entropy, and five-sample self-consistency by default:
 
 ```bash
 python scripts/build_splits.py \
-  --input phase_3/artifacts/questions_700.json \
+  --input phase_3/artifacts/questions_v1.json \
   --output phase_3/artifacts/splits.json
 
 CONFIG_PATH=configs/phase3_research.json \
 SPLITS_PATH=phase_3/artifacts/splits.json \
+QUESTIONS_PATH=phase_3/artifacts/questions_v1.json \
 PYTHONPATH=Gnosis python phase_3/run_baseline.py
+```
+
+Before any primary detector claim, confirm that the completed run has enough
+model mistakes rather than merely enough questions:
+
+```bash
+python scripts/check_error_target.py --records phase_3/artifacts/baseline_results.json
 ```
 
 ## If you see long JSON with LaTeX / `[asy]` blocks
@@ -96,7 +107,7 @@ of relying on one favorable seed.
 ```python
 import os
 os.environ["BASELINE_PATH"] = "/content/drive/MyDrive/gate_phase3_baseline.json"
-os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_700.json"
+os.environ["QUESTIONS_PATH"] = "/content/GATE/phase_3/artifacts/questions_v1.json"
 os.environ["THRESHOLD"] = "0.50"   # or 0.60
 
 %cd /content/GATE
@@ -109,6 +120,22 @@ Outputs:
 - `phase_3/artifacts/regen_comparison.json`
 
 Resume partial runs: re-run the same command. Skip a finished arm with `SKIP_GNOSIS=1` or `SKIP_RANDOM=1`.
+
+## Statistical report and compute analysis (no GPU)
+
+Run after Gnosis and at least one matched random arm complete. It adds
+bootstrap confidence intervals for AUROC/AUPRC, calibration reliability bins
+and Brier score, risk--coverage curves, paired before/after and arm-comparison
+tests, plus observed output-token/wall-time cost accounting.
+
+```bash
+python scripts/analyze_experiment.py \
+  --baseline phase_3/artifacts/baseline_results.json \
+  --split test \
+  --gnosis phase_3/artifacts/regen_gnosis_results.json \
+  --random phase_3/artifacts/regen_random_seed_11.json \
+  --output phase_3/artifacts/statistical_analysis.json
+```
 
 ## Grading / aliases
 

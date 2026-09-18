@@ -1,0 +1,10 @@
+{
+  "version": "benchmark_v1",
+  "seed": 2026,
+  "sources": [
+    {"name": "triviaqa_validation", "dataset": "mandarjoshi/trivia_qa", "config": "rc.nocontext", "split": "validation", "domain": "trivia", "count": 500, "license": "cc-by-sa-3.0", "holdout_note": "Official validation split; public test answers are not exposed."},
+    {"name": "hendrycks_math_test", "dataset": "EleutherAI/hendrycks_math", "configs": ["algebra", "counting_and_probability", "geometry", "intermediate_algebra", "number_theory", "prealgebra", "precalculus"], "split": "test", "domain": "math", "count": 450, "license": "mit", "holdout_note": "Official MATH test split; the train split is excluded from the primary claim."},
+    {"name": "arc_challenge_test", "dataset": "allenai/ai2_arc", "config": "ARC-Challenge", "split": "test", "domain": "science", "count": 350, "license": "cc-by-sa-4.0", "holdout_note": "Official ARC-Challenge test split."},
+    {"name": "mmlu_test", "dataset": "cais/mmlu", "config": "all", "split": "test", "domain": "knowledge", "count": 500, "license": "Review source terms before release.", "holdout_note": "Official MMLU test split."}
+  ]
+}

@@ -12,9 +12,23 @@
     "top_p": 0.95,
     "max_new_tokens": 1536
   },
+  "default_model": "gnosis_qwen3_1_7b_hybrid",
+  "models": [
+    {
+      "name": "gnosis_qwen3_1_7b_hybrid",
+      "id": "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid",
+      "supports_gnosis_correctness_head": true,
+      "note": "Add only independently verified Gnosis-compatible checkpoints here; each model must use its own output path."
+    }
+  ],
   "random_control_seeds": [11, 23, 37, 53, 71],
   "evaluation": {
     "intervention_budgets": [0.05, 0.1, 0.2, 0.3],
-    "calibrator_features": ["gnosis_score", "mean_token_logprob", "mean_token_entropy", "self_consistency", "semantic_agreement", "external_verifier_score"]
+    "primary_intervention_budget": 0.1,
+    "calibrator_features": ["gnosis_score", "mean_token_logprob", "mean_token_entropy", "self_consistency", "semantic_agreement", "external_verifier_score"],
+    "minimum_wrong": 150,
+    "minimum_wrong_per_domain": 20,
+    "bootstrap_replicates": 2000,
+    "confidence_level": 0.95
   }
 }

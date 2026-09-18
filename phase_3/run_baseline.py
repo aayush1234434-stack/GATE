@@ -50,8 +50,17 @@ else:
     EXPERIMENT_CONFIG = {}
 GENERATION_CONFIG = EXPERIMENT_CONFIG.get("generation", {})
 
-GNOSIS_MODEL_ID = os.environ.get("GNOSIS_MODEL_ID", "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid")
-QUESTIONS_PATH = Path(os.environ.get("QUESTIONS_PATH", ARTIFACTS / "questions_700.json"))
+MODEL_SPECS = {spec["name"]: spec for spec in EXPERIMENT_CONFIG.get("models", [])}
+MODEL_NAME = os.environ.get("MODEL_NAME", EXPERIMENT_CONFIG.get("default_model", "")).strip()
+if MODEL_NAME and MODEL_NAME not in MODEL_SPECS:
+    raise ValueError(f"MODEL_NAME={MODEL_NAME!r} is not declared in the experiment config")
+MODEL_SPEC = MODEL_SPECS.get(MODEL_NAME, {})
+GNOSIS_MODEL_ID = os.environ.get(
+    "GNOSIS_MODEL_ID", MODEL_SPEC.get("id", "AmirhoseinGH/Gnosis-Qwen3-1.7B-Hybrid")
+)
+MODEL_NAME = MODEL_NAME or MODEL_SPEC.get("name", "gnosis_qwen3_1_7b_hybrid")
+DEFAULT_QUESTIONS_PATH = ARTIFACTS / ("questions_v1.json" if EXPERIMENT_CONFIG else "questions_700.json")
+QUESTIONS_PATH = Path(os.environ.get("QUESTIONS_PATH", DEFAULT_QUESTIONS_PATH))
 BASELINE_PATH = Path(os.environ.get("BASELINE_PATH", ARTIFACTS / "baseline_results.json"))
 SPLITS_PATH = os.environ.get("SPLITS_PATH", "").strip()
 CHECKPOINT_EVERY = max(1, int(os.environ.get("CHECKPOINT_EVERY", "1")))
@@ -68,6 +77,14 @@ SYSTEM_PROMPTS = {
     "mmlu_pro": (
         "You are solving multiple-choice questions. Please reason step by step, "
         "and put your final answer with only the choice letter within \\boxed{}."
+    ),
+    "science": (
+        "You are solving a multiple-choice science question. Reason step by step, "
+        "then put only the choice letter within \\boxed{}."
+    ),
+    "knowledge": (
+        "You are solving a multiple-choice knowledge question. Reason step by step, "
+        "then put only the choice letter within \\boxed{}."
     ),
 }
 
@@ -155,6 +172,8 @@ def make_record(
         "baseline_answer": answer,
         "baseline_correct": correct,
         "gnosis_score": score,
+        "model_name": MODEL_NAME,
+        "model_id": GNOSIS_MODEL_ID,
         "generation_seed": SEED,
         "generation_temperature": TEMPERATURE,
         "generation_top_p": TOP_P,
@@ -169,11 +188,13 @@ def make_record(
         record["answer_aliases"] = q["answer_aliases"]
     if split:
         record["split"] = split
+    all_sample_metrics = generation_features.pop("_all_samples", [dict(generation_features)])
     record.update(generation_features)
     if N_SAMPLES > 1:
         record["sample_answers"] = sample_answers
         record["sample_gnosis_scores"] = sample_scores
         record["self_consistency"] = self_consistency(sample_answers)
+    record["sample_generation_metrics"] = all_sample_metrics
     return record
 
 
@@ -194,6 +215,8 @@ def record_is_complete(rec: dict) -> bool:
         or rec.get("generation_top_p") != TOP_P
         or rec.get("generation_max_new_tokens") != MAX_NEW_TOKENS
         or rec.get("generation_samples") != N_SAMPLES
+        or rec.get("model_id") != GNOSIS_MODEL_ID
+        or rec.get("model_name") != MODEL_NAME
     ):
         return False
     if N_SAMPLES > 1 and (
@@ -201,6 +224,8 @@ def record_is_complete(rec: dict) -> bool:
         or len(rec.get("sample_gnosis_scores", [])) != N_SAMPLES
         or rec.get("self_consistency") is None
     ):
+        return False
+    if len(rec.get("sample_generation_metrics", [])) != N_SAMPLES:
         return False
     return not SPLITS_PATH or rec.get("split") is not None
 
@@ -296,6 +321,8 @@ def run_baseline(
             for _ in range(N_SAMPLES)
         ]
         answer, score, generation_features = samples[0]
+        generation_features = dict(generation_features)
+        generation_features["_all_samples"] = [sample[2] for sample in samples]
         correct = is_correct(
             answer, q["ground_truth"], q.get("answer_aliases"), q.get("domain")
         )

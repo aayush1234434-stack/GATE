@@ -83,16 +83,24 @@ See [phase_3/README.md](phase_3/README.md) and
 
 ## Research experiment workflow
 
-Use the versioned [Phase 3 configuration](configs/phase3_research.json) for
-paper-facing runs. Create splits from questions *before* generating answers:
+Use the versioned [benchmark configuration](configs/benchmark_v1.json) and
+[Phase 3 configuration](configs/phase3_research.json) for paper-facing runs.
+The benchmark has 1,800 predeclared questions across TriviaQA, MATH, ARC-
+Challenge, and MMLU, with source split and license provenance on every row.
+Build it and create splits *before* generating answers:
 
 ```bash
+python phase_3/build_question_set.py \
+  --config configs/benchmark_v1.json \
+  --output phase_3/artifacts/questions_v1.json
+
 python scripts/build_splits.py \
-  --input phase_3/artifacts/questions_700.json \
+  --input phase_3/artifacts/questions_v1.json \
   --output phase_3/artifacts/splits.json
 
 CONFIG_PATH=configs/phase3_research.json \
 SPLITS_PATH=phase_3/artifacts/splits.json \
+QUESTIONS_PATH=phase_3/artifacts/questions_v1.json \
 DEVICE=cuda PYTHONPATH=Gnosis python phase_3/run_baseline.py
 ```
 
@@ -119,6 +127,39 @@ python scripts/evaluate_baselines.py \
   --output phase_3/artifacts/baseline_evaluation.json
 ```
 
+Confirm the predeclared error target before treating the run as the primary
+analysis (the default is at least 150 errors overall and 20 per domain):
+
+```bash
+python scripts/check_error_target.py \
+  --records phase_3/artifacts/baseline_with_semantics.json \
+  --output phase_3/artifacts/error_target.json
+```
+
+After the intervention arms are complete, generate paper-facing confidence
+intervals, AUROC/AUPRC, reliability bins/Brier score, risk--coverage curves,
+paired McNemar tests, and observed generation-cost estimates:
+
+```bash
+python scripts/analyze_experiment.py \
+  --baseline phase_3/artifacts/baseline_with_semantics.json \
+  --split test \
+  --gnosis phase_3/artifacts/regen_gnosis_results.json \
+  --random phase_3/artifacts/regen_random_seed_11.json \
+  --random phase_3/artifacts/regen_random_seed_23.json \
+  --output phase_3/artifacts/statistical_analysis.json
+```
+
+To evaluate more than one independently verified Gnosis-compatible checkpoint,
+add it to `models` in the research config, then inspect the generated commands:
+
+```bash
+PYTHONPATH=Gnosis python scripts/run_model_matrix.py \
+  --questions phase_3/artifacts/questions_v1.json \
+  --splits phase_3/artifacts/splits.json \
+  --output-dir phase_3/artifacts/models
+```
+
 For matched random controls, the same config defines five random seeds. Run
 `phase_3/regen_ablation.py` with `CONFIG_PATH=configs/phase3_research.json`;
 each seed is saved separately and compared to the single Gnosis-gated arm.
@@ -138,7 +179,7 @@ submodule revision.
 ## Research reporting notes
 
 Report a fixed intervention budget, precision/recall of selected answers,
-fixed versus broken answers, final accuracy, and confidence intervals. Tune
-thresholds on development data and reserve test data for the final report.
-The Phase 3 math source is not guaranteed to be a clean holdout; retain that
-limitation in any paper.
+fixed versus broken answers, final accuracy, confidence intervals, and
+compute assumptions. Tune thresholds on development data and reserve test data
+for the final report. The cost report measures observed generation tokens and
+wall time; it explicitly excludes the correctness-score forward-pass cost.
